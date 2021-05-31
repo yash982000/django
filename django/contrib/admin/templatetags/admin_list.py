@@ -6,7 +6,7 @@ from django.contrib.admin.utils import (
     label_for_field, lookup_field,
 )
 from django.contrib.admin.views.main import (
-    ALL_VAR, ORDER_VAR, PAGE_VAR, SEARCH_VAR,
+    ALL_VAR, IS_POPUP_VAR, ORDER_VAR, PAGE_VAR, SEARCH_VAR,
 )
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
@@ -234,7 +234,7 @@ def items_for_result(cl, result, form):
                 link_or_text = result_repr
             else:
                 url = add_preserved_filters({'preserved_filters': cl.preserved_filters, 'opts': cl.opts}, url)
-                # Convert the pk to something that can be used in Javascript.
+                # Convert the pk to something that can be used in JavaScript.
                 # Problem cases are non-ASCII strings.
                 if cl.to_field:
                     attr = str(cl.to_field)
@@ -423,7 +423,8 @@ def search_form(cl):
     return {
         'cl': cl,
         'show_result_count': cl.result_count != cl.full_result_count,
-        'search_var': SEARCH_VAR
+        'search_var': SEARCH_VAR,
+        'is_popup_var': IS_POPUP_VAR,
     }
 
 

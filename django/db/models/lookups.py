@@ -3,7 +3,7 @@ import math
 from copy import copy
 
 from django.core.exceptions import EmptyResultSet
-from django.db.models.expressions import Case, Exists, Func, Value, When
+from django.db.models.expressions import Case, Func, Value, When
 from django.db.models.fields import (
     CharField, DateTimeField, Field, IntegerField, UUIDField,
 )
@@ -39,6 +39,9 @@ class Lookup:
         for transform in self.bilateral_transforms:
             value = transform(value)
         return value
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.lhs!r}, {self.rhs!r})'
 
     def batch_process_rhs(self, compiler, connection, rhs=None):
         if rhs is None:
@@ -94,7 +97,13 @@ class Lookup:
             value = self.apply_bilateral_transforms(value)
             value = value.resolve_expression(compiler.query)
         if hasattr(value, 'as_sql'):
-            return compiler.compile(value)
+            sql, params = compiler.compile(value)
+            # Ensure expression is wrapped in parentheses to respect operator
+            # precedence but avoid double wrapping as it can be misinterpreted
+            # on some backends (e.g. subqueries on SQLite).
+            if sql and sql[0] != '(':
+                sql = '(%s)' % sql
+            return sql, params
         else:
             return self.get_db_prep_lookup(value, connection)
 
@@ -118,12 +127,12 @@ class Lookup:
         raise NotImplementedError
 
     def as_oracle(self, compiler, connection):
-        # Oracle doesn't allow EXISTS() to be compared to another expression
-        # unless it's wrapped in a CASE WHEN.
+        # Oracle doesn't allow EXISTS() and filters to be compared to another
+        # expression unless they're wrapped in a CASE WHEN.
         wrapped = False
         exprs = []
         for expr in (self.lhs, self.rhs):
-            if isinstance(expr, Exists):
+            if connection.ops.conditional_expression_supported_in_where_clause(expr):
                 expr = Case(When(expr, then=True), default=False)
                 wrapped = True
             exprs.append(expr)
@@ -399,6 +408,15 @@ class In(FieldGetDbPrepValueIterableMixin, BuiltinLookup):
                 self.rhs.clear_select_clause()
                 self.rhs.add_fields(['pk'])
             return super().process_rhs(compiler, connection)
+
+    def get_group_by_cols(self, alias=None):
+        cols = self.lhs.get_group_by_cols()
+        if hasattr(self.rhs, 'get_group_by_cols'):
+            if not getattr(self.rhs, 'has_select_fields', True):
+                self.rhs.clear_select_clause()
+                self.rhs.add_fields(['pk'])
+            cols.extend(self.rhs.get_group_by_cols())
+        return cols
 
     def get_rhs_op(self, connection, rhs):
         return 'IN %s' % rhs

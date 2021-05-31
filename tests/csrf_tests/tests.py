@@ -6,7 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import (
     CSRF_SESSION_KEY, CSRF_TOKEN_LENGTH, REASON_BAD_ORIGIN, REASON_BAD_TOKEN,
-    REASON_NO_CSRF_COOKIE, CsrfViewMiddleware,
+    REASON_NO_CSRF_COOKIE, CsrfViewMiddleware, RejectRequest,
     _compare_masked_tokens as equivalent_tokens, get_token,
 )
 from django.test import SimpleTestCase, override_settings
@@ -305,6 +305,24 @@ class CsrfViewMiddlewareTestMixin:
             status_code=403,
         )
 
+    def _check_referer_rejects(self, mw, req):
+        with self.assertRaises(RejectRequest):
+            mw._check_referer(req)
+
+    @override_settings(DEBUG=True)
+    def test_https_no_referer(self):
+        """A POST HTTPS request with a missing referer is rejected."""
+        req = self._get_POST_request_with_token()
+        req._is_secure_override = True
+        mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
+        response = mw.process_view(req, post_form_view, (), {})
+        self.assertContains(
+            response,
+            'Referer checking failed - no Referer.',
+            status_code=403,
+        )
+
     def test_https_malformed_host(self):
         """
         CsrfViewMiddleware generates a 403 response if it receives an HTTPS
@@ -316,6 +334,12 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_REFERER'] = 'https://www.evil.org/somepage'
         req.META['SERVER_PORT'] = '443'
         mw = CsrfViewMiddleware(token_view)
+        expected = (
+            'Referer checking failed - https://www.evil.org/somepage does not '
+            'match any trusted origins.'
+        )
+        with self.assertRaisesMessage(RejectRequest, expected):
+            mw._check_referer(req)
         response = mw.process_view(req, token_view, (), {})
         self.assertEqual(response.status_code, 403)
 
@@ -325,6 +349,7 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_HOST'] = '@malformed'
         req.META['HTTP_ORIGIN'] = 'https://www.evil.org'
         mw = CsrfViewMiddleware(token_view)
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, token_view, (), {})
         self.assertEqual(response.status_code, 403)
 
@@ -338,6 +363,7 @@ class CsrfViewMiddlewareTestMixin:
         req._is_secure_override = True
         req.META['HTTP_REFERER'] = 'http://http://www.example.com/'
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(
             response,
@@ -346,28 +372,33 @@ class CsrfViewMiddlewareTestMixin:
         )
         # Empty
         req.META['HTTP_REFERER'] = ''
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(response, malformed_referer_msg, status_code=403)
         # Non-ASCII
         req.META['HTTP_REFERER'] = 'ØBöIß'
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(response, malformed_referer_msg, status_code=403)
         # missing scheme
         # >>> urlparse('//example.com/')
         # ParseResult(scheme='', netloc='example.com', path='/', params='', query='', fragment='')
         req.META['HTTP_REFERER'] = '//example.com/'
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(response, malformed_referer_msg, status_code=403)
         # missing netloc
         # >>> urlparse('https://')
         # ParseResult(scheme='https', netloc='', path='', params='', query='', fragment='')
         req.META['HTTP_REFERER'] = 'https://'
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(response, malformed_referer_msg, status_code=403)
         # Invalid URL
         # >>> urlparse('https://[')
         # ValueError: Invalid IPv6 URL
         req.META['HTTP_REFERER'] = 'https://['
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(response, malformed_referer_msg, status_code=403)
 
@@ -411,6 +442,21 @@ class CsrfViewMiddlewareTestMixin:
             'HTTP_X_FORWARDED_HOST': 'www.example.com',
             'HTTP_X_FORWARDED_PORT': '443',
         })
+        mw = CsrfViewMiddleware(post_form_view)
+        mw.process_request(req)
+        resp = mw.process_view(req, post_form_view, (), {})
+        self.assertIsNone(resp)
+
+    @override_settings(CSRF_TRUSTED_ORIGINS=['https://dashboard.example.com'])
+    def test_https_good_referer_malformed_host(self):
+        """
+        A POST HTTPS request is accepted if it receives a good referer with
+        a bad host.
+        """
+        req = self._get_POST_request_with_token()
+        req._is_secure_override = True
+        req.META['HTTP_HOST'] = '@malformed'
+        req.META['HTTP_REFERER'] = 'https://dashboard.example.com/somepage'
         mw = CsrfViewMiddleware(post_form_view)
         mw.process_request(req)
         resp = mw.process_view(req, post_form_view, (), {})
@@ -534,6 +580,7 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_HOST'] = 'www.example.com'
         req.META['HTTP_ORIGIN'] = 'https://www.evil.org'
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         self.assertIs(mw._origin_verified(req), False)
         with self.assertLogs('django.security.csrf', 'WARNING') as cm:
             response = mw.process_view(req, post_form_view, (), {})
@@ -548,6 +595,7 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_HOST'] = 'www.example.com'
         req.META['HTTP_ORIGIN'] = 'null'
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         self.assertIs(mw._origin_verified(req), False)
         with self.assertLogs('django.security.csrf', 'WARNING') as cm:
             response = mw.process_view(req, post_form_view, (), {})
@@ -563,6 +611,7 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_HOST'] = 'www.example.com'
         req.META['HTTP_ORIGIN'] = 'http://example.com'
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         self.assertIs(mw._origin_verified(req), False)
         with self.assertLogs('django.security.csrf', 'WARNING') as cm:
             response = mw.process_view(req, post_form_view, (), {})
@@ -589,6 +638,7 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_HOST'] = 'www.example.com'
         req.META['HTTP_ORIGIN'] = 'http://foo.example.com'
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         self.assertIs(mw._origin_verified(req), False)
         with self.assertLogs('django.security.csrf', 'WARNING') as cm:
             response = mw.process_view(req, post_form_view, (), {})
@@ -611,6 +661,7 @@ class CsrfViewMiddlewareTestMixin:
         req.META['HTTP_HOST'] = 'www.example.com'
         req.META['HTTP_ORIGIN'] = 'https://['
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         self.assertIs(mw._origin_verified(req), False)
         with self.assertLogs('django.security.csrf', 'WARNING') as cm:
             response = mw.process_view(req, post_form_view, (), {})
@@ -839,6 +890,7 @@ class CsrfViewMiddlewareTests(CsrfViewMiddlewareTestMixin, SimpleTestCase):
         req.META['HTTP_REFERER'] = 'http://example.com/'
         req.META['SERVER_PORT'] = '443'
         mw = CsrfViewMiddleware(post_form_view)
+        self._check_referer_rejects(mw, req)
         response = mw.process_view(req, post_form_view, (), {})
         self.assertContains(
             response,

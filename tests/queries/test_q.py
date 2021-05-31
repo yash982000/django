@@ -1,4 +1,5 @@
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import BooleanField, Exists, F, OuterRef, Q
+from django.db.models.expressions import RawSQL
 from django.test import SimpleTestCase
 
 from .models import Tag
@@ -26,6 +27,19 @@ class QTests(SimpleTestCase):
         self.assertEqual(q | Q(), q)
         self.assertEqual(Q() | q, q)
 
+    def test_combine_empty_copy(self):
+        base_q = Q(x=1)
+        tests = [
+            base_q | Q(),
+            Q() | base_q,
+            base_q & Q(),
+            Q() & base_q,
+        ]
+        for i, q in enumerate(tests):
+            with self.subTest(i=i):
+                self.assertEqual(q, base_q)
+                self.assertIsNot(q, base_q)
+
     def test_combine_or_both_empty(self):
         self.assertEqual(Q() | Q(), Q())
 
@@ -36,6 +50,16 @@ class QTests(SimpleTestCase):
             q | obj
         with self.assertRaisesMessage(TypeError, str(obj)):
             q & obj
+
+    def test_combine_negated_boolean_expression(self):
+        tagged = Tag.objects.filter(category=OuterRef('pk'))
+        tests = [
+            Q() & ~Exists(tagged),
+            Q() | ~Exists(tagged),
+        ]
+        for q in tests:
+            with self.subTest(q=q):
+                self.assertIs(q.negated, True)
 
     def test_deconstruct(self):
         q = Q(price__gt=F('discounted_price'))
@@ -88,10 +112,10 @@ class QTests(SimpleTestCase):
         self.assertEqual(kwargs, {})
 
     def test_deconstruct_boolean_expression(self):
-        tagged = Tag.objects.filter(category=OuterRef('pk'))
-        q = Q(Exists(tagged))
+        expr = RawSQL('1 = 1', BooleanField())
+        q = Q(expr)
         _, args, kwargs = q.deconstruct()
-        self.assertEqual(args, (Exists(tagged),))
+        self.assertEqual(args, (expr,))
         self.assertEqual(kwargs, {})
 
     def test_reconstruct(self):

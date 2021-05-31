@@ -548,25 +548,40 @@ def _sqlite_time_extract(lookup_type, dt):
     return getattr(dt, lookup_type)
 
 
+def _sqlite_prepare_dtdelta_param(conn, param):
+    if conn in ['+', '-']:
+        if isinstance(param, int):
+            return datetime.timedelta(0, 0, param)
+        else:
+            return backend_utils.typecast_timestamp(param)
+    return param
+
+
 @none_guard
 def _sqlite_format_dtdelta(conn, lhs, rhs):
     """
     LHS and RHS can be either:
     - An integer number of microseconds
     - A string representing a datetime
+    - A scalar value, e.g. float
     """
+    conn = conn.strip()
     try:
-        real_lhs = datetime.timedelta(0, 0, lhs) if isinstance(lhs, int) else backend_utils.typecast_timestamp(lhs)
-        real_rhs = datetime.timedelta(0, 0, rhs) if isinstance(rhs, int) else backend_utils.typecast_timestamp(rhs)
-        if conn.strip() == '+':
-            out = real_lhs + real_rhs
-        else:
-            out = real_lhs - real_rhs
+        real_lhs = _sqlite_prepare_dtdelta_param(conn, lhs)
+        real_rhs = _sqlite_prepare_dtdelta_param(conn, rhs)
     except (ValueError, TypeError):
         return None
-    # typecast_timestamp returns a date or a datetime without timezone.
-    # It will be formatted as "%Y-%m-%d" or "%Y-%m-%d %H:%M:%S[.%f]"
-    return str(out)
+    if conn == '+':
+        # typecast_timestamp returns a date or a datetime without timezone.
+        # It will be formatted as "%Y-%m-%d" or "%Y-%m-%d %H:%M:%S[.%f]"
+        out = str(real_lhs + real_rhs)
+    elif conn == '-':
+        out = str(real_lhs - real_rhs)
+    elif conn == '*':
+        out = real_lhs * real_rhs
+    else:
+        out = real_lhs / real_rhs
+    return out
 
 
 @none_guard

@@ -72,6 +72,12 @@ Minor features
 
 * The navigation sidebar now has a quick filter toolbar.
 
+* The new context variable ``model`` which contains the model class for each
+  model is added to the :meth:`.AdminSite.each_context` method.
+
+* The new :attr:`.ModelAdmin.search_help_text` attribute allows specifying a
+  descriptive text for the search box.
+
 :mod:`django.contrib.admindocs`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -101,6 +107,9 @@ Minor features
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 * Added support for SpatiaLite 5.
+
+* :class:`~django.contrib.gis.gdal.GDALRaster` now allows creating rasters in
+  any GDAL virtual filesystem.
 
 :mod:`django.contrib.messages`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -233,6 +242,9 @@ Models
 * :meth:`.QuerySet.bulk_create` now sets the primary key on objects when using
   SQLite 3.35+.
 
+* :class:`~django.db.models.DurationField` now supports multiplying and
+  dividing by scalar values on SQLite.
+
 Requests and Responses
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -309,6 +321,9 @@ backends.
   ``iso_year`` argument in order to support bounds for ISO-8601 week-numbering
   years.
 
+* The second argument of ``DatabaseSchemaEditor._unique_sql()`` and
+  ``_create_unique_sql()`` methods is now fields instead of columns.
+
 :mod:`django.contrib.gis`
 -------------------------
 
@@ -354,6 +369,36 @@ subdomains by setting :setting:`CSRF_COOKIE_DOMAIN` (or
 :setting:`SESSION_COOKIE_DOMAIN` if :setting:`CSRF_USE_SESSIONS` is enabled) to
 a value starting with a dot.
 
+``SecurityMiddleware`` no longer sets the ``X-XSS-Protection`` header
+---------------------------------------------------------------------
+
+The :class:`~django.middleware.security.SecurityMiddleware` no longer sets the
+``X-XSS-Protection`` header if the ``SECURE_BROWSER_XSS_FILTER`` setting is
+``True``. The setting is removed.
+
+Most modern browsers don't honor the ``X-XSS-Protection`` HTTP header. You can
+use Content-Security-Policy_ without allowing ``'unsafe-inline'`` scripts
+instead.
+
+If you want to support legacy browsers and set the header, use this line in a
+custom middleware::
+
+    response.headers.setdefault('X-XSS-Protection', '1; mode=block')
+
+.. _Content-Security-Policy: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy
+
+Migrations autodetector changes
+-------------------------------
+
+The migrations autodetector now uses model states instead of model classes.
+Also, migration operations for ``ForeignKey`` and ``ManyToManyField`` fields no
+longer specify attributes which were not passed to the fields during
+initialization.
+
+As a side-effect, running ``makemigrations`` might generate no-op
+``AlterField`` operations for ``ManyToManyField`` and ``ForeignKey`` fields in
+some cases.
+
 Miscellaneous
 -------------
 
@@ -389,10 +434,37 @@ Miscellaneous
 * Tests that fail to load, for example due to syntax errors, now always match
   when using :option:`test --tag`.
 
+* The undocumented ``django.contrib.admin.utils.lookup_needs_distinct()``
+  function is renamed to ``lookup_spawns_duplicates()``.
+
+* The undocumented ``HttpRequest.get_raw_uri()`` method is removed. The
+  :meth:`.HttpRequest.build_absolute_uri` method may be a suitable alternative.
+
+* The ``object`` argument of undocumented ``ModelAdmin.log_addition()``,
+  ``log_change()``, and ``log_deletion()`` methods is renamed to ``obj``.
+
+* :class:`~django.utils.feedgenerator.RssFeed`,
+  :class:`~django.utils.feedgenerator.Atom1Feed`, and their subclasses now
+  emit elements with no content as self-closing tags.
+
 .. _deprecated-features-4.0:
 
 Features deprecated in 4.0
 ==========================
+
+Time zone support
+-----------------
+
+In order to follow good practice, the default value of the :setting:`USE_TZ`
+setting will change from ``False`` to ``True``, and time zone support will be
+enabled by default, in Django 5.0.
+
+Note that the default :file:`settings.py` file created by
+:djadmin:`django-admin startproject <startproject>` includes
+:setting:`USE_TZ = True <USE_TZ>` since Django 1.4.
+
+You can set ``USE_TZ`` to ``False`` in your project settings before then to
+opt-out.
 
 Miscellaneous
 -------------
@@ -400,6 +472,13 @@ Miscellaneous
 * ``SERIALIZE`` test setting is deprecated as it can be inferred from the
   :attr:`~django.test.TestCase.databases` with the
   :ref:`serialized_rollback <test-case-serialized-rollback>` option enabled.
+
+* The undocumented ``django.utils.baseconv`` module is deprecated.
+
+* The undocumented ``django.utils.datetime_safe`` module is deprecated.
+
+* The default sitemap protocol for sitemaps built outside the context of a
+  request will change from ``'http'`` to ``'https'`` in Django 5.0.
 
 Features removed in 4.0
 =======================
@@ -460,7 +539,7 @@ to remove usage of these features.
 * Support for the pre-Django 3.1 user sessions (that use the SHA-1 algorithm)
   is removed.
 
-* The ``get_request`` argument for
+* The ``get_response`` argument for
   ``django.utils.deprecation.MiddlewareMixin.__init__()`` is required and
   doesn't accept ``None``.
 

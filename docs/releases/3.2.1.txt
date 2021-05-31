@@ -2,9 +2,18 @@
 Django 3.2.1 release notes
 ==========================
 
-*Expected May 4, 2021*
+*May 4, 2021*
 
-Django 3.2.1 fixes several bugs in 3.2.
+Django 3.2.1 fixes a security issue and several bugs in 3.2.
+
+CVE-2021-31542: Potential directory-traversal via uploaded files
+================================================================
+
+``MultiPartParser``, ``UploadedFile``, and ``FieldFile`` allowed
+directory-traversal via uploaded files with suitably crafted file names.
+
+In order to mitigate this risk, stricter basename and path sanitation is now
+applied.
 
 Bugfixes
 ========
@@ -44,3 +53,31 @@ Bugfixes
 * Fixed a regression in Django 3.2 that caused a crash when decoding a cookie
   value, used by ``django.contrib.messages.storage.cookie.CookieStorage``, in
   the pre-Django 3.2 format (:ticket:`32643`).
+
+* Fixed a regression in Django 3.2 that stopped the shift-key modifier
+  selecting multiple rows in the admin changelist (:ticket:`32647`).
+
+* Fixed a bug in Django 3.2 where a system check would crash on the
+  :setting:`STATICFILES_DIRS` setting with a list of 2-tuples of
+  ``(prefix, path)`` (:ticket:`32665`).
+
+* Fixed a long standing bug involving queryset bitwise combination when used
+  with subqueries that began manifesting in Django 3.2, due to a separate fix
+  using ``Exists`` to ``exclude()`` multi-valued relationships
+  (:ticket:`32650`).
+
+* Fixed a bug in Django 3.2 where variable lookup errors were logged when
+  rendering some admin templates (:ticket:`32681`).
+
+* Fixed a bug in Django 3.2 where an admin changelist would crash when deleting
+  objects filtered against multi-valued relationships (:ticket:`32682`). The
+  admin changelist now uses ``Exists()`` instead ``QuerySet.distinct()``
+  because calling ``delete()`` after ``distinct()`` is not allowed in Django
+  3.2 to address a data loss possibility.
+
+* Fixed a regression in Django 3.2 where the calling process environment would
+  not be passed to the ``dbshell`` command on PostgreSQL (:ticket:`32687`).
+
+* Fixed a performance regression in Django 3.2 when building complex filters
+  with subqueries (:ticket:`32632`). As a side-effect the private API to check
+  ``django.db.sql.query.Query`` equality is removed.
